@@ -8,20 +8,23 @@ package raft
 // test with the original before submitting.
 //
 
-import "6.5840/labgob"
-import "6.5840/labrpc"
-import "bytes"
-import "log"
-import "sync"
-import "sync/atomic"
-import "testing"
-import "runtime"
-import "math/rand"
-import crand "crypto/rand"
-import "math/big"
-import "encoding/base64"
-import "time"
-import "fmt"
+import (
+	"bytes"
+	crand "crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"log"
+	"math/big"
+	"math/rand"
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/Rememorio/MIT-6.5840/labgob"
+	"github.com/Rememorio/MIT-6.5840/labrpc"
+)
 
 func randstring(n int) string {
 	b := make([]byte, 2*n)
@@ -47,8 +50,8 @@ type config struct {
 	applyErr    []string // from apply channel readers
 	connected   []bool   // whether each server is on the net
 	saved       []*Persister
-	endnames    [][]string            // the port file names each sends to
-	logs        []map[int]interface{} // copy of each server's committed entries
+	endnames    [][]string    // the port file names each sends to
+	logs        []map[int]any // copy of each server's committed entries
 	lastApplied []int
 	start       time.Time // time at which make_config() was called
 	// begin()/end() statistics
@@ -79,7 +82,7 @@ func make_config(t *testing.T, n int, unreliable bool, snapshot bool) *config {
 	cfg.connected = make([]bool, cfg.n)
 	cfg.saved = make([]*Persister, cfg.n)
 	cfg.endnames = make([][]string, cfg.n)
-	cfg.logs = make([]map[int]interface{}, cfg.n)
+	cfg.logs = make([]map[int]any, cfg.n)
 	cfg.lastApplied = make([]int, cfg.n)
 	cfg.start = time.Now()
 
@@ -93,7 +96,7 @@ func make_config(t *testing.T, n int, unreliable bool, snapshot bool) *config {
 	}
 	// create a full set of Rafts.
 	for i := 0; i < cfg.n; i++ {
-		cfg.logs[i] = map[int]interface{}{}
+		cfg.logs[i] = map[int]any{}
 		cfg.start1(i, applier)
 	}
 
@@ -188,7 +191,7 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 	r := bytes.NewBuffer(snapshot)
 	d := labgob.NewDecoder(r)
 	var lastIncludedIndex int
-	var xlog []interface{}
+	var xlog []any
 	if d.Decode(&lastIncludedIndex) != nil ||
 		d.Decode(&xlog) != nil {
 		log.Fatalf("snapshot decode error")
@@ -198,7 +201,7 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 		err := fmt.Sprintf("server %v snapshot doesn't match m.SnapshotIndex", i)
 		return err
 	}
-	cfg.logs[i] = map[int]interface{}{}
+	cfg.logs[i] = map[int]any{}
 	for j := 0; j < len(xlog); j++ {
 		cfg.logs[i][j] = xlog[j]
 	}
@@ -246,7 +249,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 				w := new(bytes.Buffer)
 				e := labgob.NewEncoder(w)
 				e.Encode(m.CommandIndex)
-				var xlog []interface{}
+				var xlog []any
 				for j := 0; j <= m.CommandIndex; j++ {
 					xlog = append(xlog, cfg.logs[i][j])
 				}
@@ -485,9 +488,9 @@ func (cfg *config) checkNoLeader() {
 }
 
 // how many servers think a log entry is committed?
-func (cfg *config) nCommitted(index int) (int, interface{}) {
+func (cfg *config) nCommitted(index int) (int, any) {
 	count := 0
-	var cmd interface{} = nil
+	var cmd any = nil
 	for i := 0; i < len(cfg.rafts); i++ {
 		if cfg.applyErr[i] != "" {
 			cfg.t.Fatal(cfg.applyErr[i])
@@ -511,7 +514,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 
 // wait for at least n servers to commit.
 // but don't wait forever.
-func (cfg *config) wait(index int, n int, startTerm int) interface{} {
+func (cfg *config) wait(index int, n int, startTerm int) any {
 	to := 10 * time.Millisecond
 	for iters := 0; iters < 30; iters++ {
 		nd, _ := cfg.nCommitted(index)
@@ -552,7 +555,7 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 // times, in case a leader fails just after Start().
 // if retry==false, calls Start() only once, in order
 // to simplify the early Lab 3B tests.
-func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
+func (cfg *config) one(cmd any, expectedServers int, retry bool) int {
 	t0 := time.Now()
 	starts := 0
 	for time.Since(t0).Seconds() < 10 && cfg.checkFinished() == false {

@@ -1,9 +1,6 @@
 package kvsrv
 
 import (
-	"6.5840/models"
-	"6.5840/porcupine"
-
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -15,6 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Rememorio/MIT-6.5840/models"
+	"github.com/Rememorio/MIT-6.5840/porcupine"
 )
 
 const linearizabilityCheckTimeout = 1 * time.Second

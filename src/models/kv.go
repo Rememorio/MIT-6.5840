@@ -1,8 +1,11 @@
 package models
 
-import "6.5840/porcupine"
-import "fmt"
-import "sort"
+import (
+	"fmt"
+	"sort"
+
+	"github.com/Rememorio/MIT-6.5840/porcupine"
+)
 
 type KvInput struct {
 	Op    uint8 // 0 => get, 1 => put, 2 => append
@@ -32,12 +35,12 @@ var KvModel = porcupine.Model{
 		}
 		return ret
 	},
-	Init: func() interface{} {
+	Init: func() any {
 		// note: we are modeling a single key's value here;
 		// we're partitioning by key, so this is okay
 		return ""
 	},
-	Step: func(state, input, output interface{}) (bool, interface{}) {
+	Step: func(state, input, output any) (bool, any) {
 		inp := input.(KvInput)
 		out := output.(KvOutput)
 		st := state.(string)
@@ -55,7 +58,7 @@ var KvModel = porcupine.Model{
 			return out.Value == st, (st + inp.Value)
 		}
 	},
-	DescribeOperation: func(input, output interface{}) string {
+	DescribeOperation: func(input, output any) string {
 		inp := input.(KvInput)
 		out := output.(KvOutput)
 		switch inp.Op {

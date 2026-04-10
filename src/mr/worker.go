@@ -1,91 +1,192 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
+import (
+	"encoding/json"
+	"fmt"
+	"hash/fnv"
+	"io"
+	"log"
+	"net/rpc"
+	"os"
+	"sort"
+	"time"
+)
 
-
-//
-// Map functions return a slice of KeyValue.
-//
+// KeyValue is emitted by Map functions.
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-//
-// use ihash(key) % NReduce to choose the reduce
-// task number for each KeyValue emitted by Map.
-//
+// ByKey implements sort.Interface for []KeyValue based on Key.
+type ByKey []KeyValue
+
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
+
+// ihash returns a hash for use in partitioning keys to reduce tasks.
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-
-//
-// main/mrworker.go calls this function.
-//
+// Worker is the main loop for a MapReduce worker.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	// Your worker implementation here.
+	for {
+		reply, err := callGetTask()
+		if err != nil {
+			// Coordinator is probably gone; exit.
+			return
+		}
 
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
-
-}
-
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
+		switch reply.TaskType {
+		case MapTask:
+			doMap(mapf, reply)
+		case ReduceTask:
+			doReduce(reducef, reply)
+		case WaitTask:
+			time.Sleep(time.Second)
+		case ExitTask:
+			return
+		}
 	}
 }
 
-//
-// send an RPC request to the coordinator, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
-//
-func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
+func callGetTask() (*TaskResponse, error) {
+	req := &TaskRequest{}
+	reply := &TaskResponse{}
+	if err := call("Coordinator.GetTask", req, reply); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+func callTaskDone(taskType TaskType, taskId int) {
+	req := &DoneRequest{TaskType: taskType, TaskId: taskId}
+	reply := &DoneResponse{}
+	call("Coordinator.TaskDone", req, reply)
+}
+
+func doMap(mapf func(string, string) []KeyValue, task *TaskResponse) {
+	// Read input file
+	file, err := os.Open(task.FileName)
+	if err != nil {
+		log.Printf("cannot open %v: %v", task.FileName, err)
+		return
+	}
+	content, err := io.ReadAll(file)
+	file.Close()
+	if err != nil {
+		log.Printf("cannot read %v: %v", task.FileName, err)
+		return
+	}
+
+	// Call map function
+	kva := mapf(task.FileName, string(content))
+
+	// Partition into nReduce intermediate files
+	buckets := make([][]KeyValue, task.NReduce)
+	for _, kv := range kva {
+		bucket := ihash(kv.Key) % task.NReduce
+		buckets[bucket] = append(buckets[bucket], kv)
+	}
+
+	// Write each bucket to a temp file, then atomically rename
+	for i, bucket := range buckets {
+		tmpFile, err := os.CreateTemp(".", "mr-tmp-*")
+		if err != nil {
+			log.Printf("cannot create temp file: %v", err)
+			return
+		}
+		enc := json.NewEncoder(tmpFile)
+		for _, kv := range bucket {
+			if err := enc.Encode(&kv); err != nil {
+				log.Printf("cannot encode kv: %v", err)
+				tmpFile.Close()
+				os.Remove(tmpFile.Name())
+				return
+			}
+		}
+		tmpFile.Close()
+
+		outName := fmt.Sprintf("mr-%d-%d", task.TaskId, i)
+		if err := os.Rename(tmpFile.Name(), outName); err != nil {
+			log.Printf("cannot rename %v to %v: %v", tmpFile.Name(), outName, err)
+			return
+		}
+	}
+
+	callTaskDone(MapTask, task.TaskId)
+}
+
+func doReduce(reducef func(string, []string) string, task *TaskResponse) {
+	// Read all intermediate files for this reduce task
+	var intermediate []KeyValue
+	for i := 0; i < task.NMap; i++ {
+		filename := fmt.Sprintf("mr-%d-%d", i, task.TaskId)
+		file, err := os.Open(filename)
+		if err != nil {
+			log.Printf("cannot open %v: %v", filename, err)
+			continue
+		}
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate, kv)
+		}
+		file.Close()
+	}
+
+	// Sort by key
+	sort.Sort(ByKey(intermediate))
+
+	// Write output to a temp file, then atomically rename
+	tmpFile, err := os.CreateTemp(".", "mr-out-tmp-*")
+	if err != nil {
+		log.Printf("cannot create temp file: %v", err)
+		return
+	}
+
+	// Call Reduce on each distinct key
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		var values []string
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+		fmt.Fprintf(tmpFile, "%v %v\n", intermediate[i].Key, output)
+		i = j
+	}
+	tmpFile.Close()
+
+	outName := fmt.Sprintf("mr-out-%d", task.TaskId)
+	if err := os.Rename(tmpFile.Name(), outName); err != nil {
+		log.Printf("cannot rename %v to %v: %v", tmpFile.Name(), outName, err)
+		return
+	}
+
+	callTaskDone(ReduceTask, task.TaskId)
+}
+
+// call sends an RPC to the coordinator.
+func call(rpcname string, args any, reply any) error {
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		return err
 	}
 	defer c.Close()
-
-	err = c.Call(rpcname, args, reply)
-	if err == nil {
-		return true
-	}
-
-	fmt.Println(err)
-	return false
+	return c.Call(rpcname, args, reply)
 }

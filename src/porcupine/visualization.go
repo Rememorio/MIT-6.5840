@@ -37,8 +37,8 @@ func computeVisualizationData(model Model, info linearizationInfo) visualization
 		// history
 		n := len(info.history[partition]) / 2
 		history := make([]historyElement, n)
-		callValue := make(map[int]interface{})
-		returnValue := make(map[int]interface{})
+		callValue := make(map[int]any)
+		returnValue := make(map[int]any)
 		for _, elem := range info.history[partition] {
 			switch elem.kind {
 			case callEntry:

@@ -4,9 +4,9 @@ import "fmt"
 
 type Operation struct {
 	ClientId int // optional, unless you want a visualization; zero-indexed
-	Input    interface{}
+	Input    any
 	Call     int64 // invocation time
-	Output   interface{}
+	Output   any
 	Return   int64 // response time
 }
 
@@ -20,7 +20,7 @@ const (
 type Event struct {
 	ClientId int // optional, unless you want a visualization; zero-indexed
 	Kind     EventKind
-	Value    interface{}
+	Value    any
 	Id       int
 }
 
@@ -32,20 +32,20 @@ type Model struct {
 	Partition      func(history []Operation) [][]Operation
 	PartitionEvent func(history []Event) [][]Event
 	// Initial state of the system.
-	Init func() interface{}
+	Init func() any
 	// Step function for the system. Returns whether or not the system
 	// could take this step with the given inputs and outputs and also
 	// returns the new state. This should not mutate the existing state.
-	Step func(state interface{}, input interface{}, output interface{}) (bool, interface{})
+	Step func(state any, input any, output any) (bool, any)
 	// Equality on states. If you are using a simple data type for states,
 	// you can use the `ShallowEqual` function implemented below.
-	Equal func(state1, state2 interface{}) bool
+	Equal func(state1, state2 any) bool
 	// For visualization, describe an operation as a string.
 	// For example, "Get('x') -> 'y'".
-	DescribeOperation func(input interface{}, output interface{}) string
+	DescribeOperation func(input any, output any) string
 	// For visualization purposes, describe a state as a string.
 	// For example, "{'x' -> 'y', 'z' -> 'w'}"
-	DescribeState func(state interface{}) string
+	DescribeState func(state any) string
 }
 
 func NoPartition(history []Operation) [][]Operation {
@@ -56,15 +56,15 @@ func NoPartitionEvent(history []Event) [][]Event {
 	return [][]Event{history}
 }
 
-func ShallowEqual(state1, state2 interface{}) bool {
+func ShallowEqual(state1, state2 any) bool {
 	return state1 == state2
 }
 
-func DefaultDescribeOperation(input interface{}, output interface{}) string {
+func DefaultDescribeOperation(input any, output any) string {
 	return fmt.Sprintf("%v -> %v", input, output)
 }
 
-func DefaultDescribeState(state interface{}) string {
+func DefaultDescribeState(state any) string {
 	return fmt.Sprintf("%v", state)
 }
 

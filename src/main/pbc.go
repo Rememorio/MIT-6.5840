@@ -18,9 +18,12 @@ package main
 // and restart them to exercise fault tolerance.
 //
 
-import "6.5840/pbservice"
-import "os"
-import "fmt"
+import (
+	"fmt"
+	"os"
+
+	"github.com/Rememorio/MIT-6.5840/pbservice"
+)
 
 func usage() {
 	fmt.Printf("Usage: pbc viewport key\n")
